@@ -1,0 +1,132 @@
+#!/usr/bin/python
+
+import sys
+import subprocess
+import string
+import re
+import json
+import urllib
+
+import math
+
+
+def distance_on_unit_sphere(lat1, long1, lat2, long2):                                                                                                        
+                                                                                                                                                              
+    # Convert latitude and longitude to                                                                                                                       
+    # spherical coordinates in radians.                                                                                                                       
+    degrees_to_radians = math.pi/180.0                                                                                                                        
+                                                                                                                                                              
+    # phi = 90 - latitude
+    phi1 = (90.0 - lat1)*degrees_to_radians
+    phi2 = (90.0 - lat2)*degrees_to_radians
+        
+    # theta = longitude
+    theta1 = long1*degrees_to_radians
+    theta2 = long2*degrees_to_radians
+        
+    # Compute spherical distance from spherical coordinates.
+        
+    # For two locations in spherical coordinates 
+    # (1, theta, phi) and (1, theta, phi)
+    # cosine( arc length ) = 
+    #    sin phi sin phi' cos(theta-theta') + cos phi cos phi'
+    # distance = rho * arc length
+    
+    cos = (math.sin(phi1)*math.sin(phi2)*math.cos(theta1 - theta2) + 
+           math.cos(phi1)*math.cos(phi2))
+    arc = math.acos( cos )
+
+    # Remember to multiply arc by the radius of the earth 
+    # in your favorite set of units to get length.
+    return arc
+
+
+def main(argv):
+  if len(sys.argv) != 2:
+    print 'python getlatlng_intersect.py "720 Bathurst, Toronto, ON"'
+    return
+  address = urllib.quote_plus(argv[1])
+  url = "http://maps.googleapis.com/maps/api/geocode/json?address=" + address + "&sensor=true";
+  codeproc = subprocess.Popen(["curl", "-s", url], stdout=subprocess.PIPE)
+  codeproc.wait()
+  returncode = codeproc.returncode
+  result = codeproc.stdout.read()
+
+  # Parse the resulting json file
+  data = json.loads(result)
+  code = ''
+  lat = 0
+  lng = 0
+  isIntersection = 0
+  if returncode != 0:
+    code = 'ERR'
+  elif data['status'] != 'OK':
+    code = 'ERR'
+  elif len(data['results']) == 0:
+    code = 'EMPTY'
+
+  #print code
+  if len(code) == 0:
+    #print data
+    if 'intersection' in data['results'][0]['types']:
+      code = "INTERSECTION"
+    #print data['results'][0]['geometry']
+    #print data['results'][0]['geometry']['location']
+    lat = float(data['results'][0]['geometry']['location']['lat'])
+    lng = float(data['results'][0]['geometry']['location']['lng'])
+
+#   print str(lat) + "\t" + str(lng) + "\t" + code
+  if (code == 'ERR') or (code == 'EMPTY'):
+    sys.exit(1)  
+
+  # grabbed from get closest
+
+  # if len(argv) != 4:
+  #   print " python getclosest.py latitutde longitude tab-separated-db"
+  #   return
+
+  db = "db"
+
+  NUM_MATCHES = 1
+
+  best = []
+  f = open(db)
+  for line in f:
+    splits = line.split("\t")
+    if len(splits) < 3: break
+    linelat = float(splits[1])
+    linelng = float(splits[2])
+    dist = 6373 * distance_on_unit_sphere(lat, lng, linelat, linelng)
+    # Put the result into the list of best things
+    best.append((splits[0], dist, linelat, linelng))
+    # We only want the 10 best results, so we'll dump the worst one
+    if len(best) > NUM_MATCHES:
+      worst = 0
+      for n in range(len(best)):
+        if best[worst][1] < best[n][1]: worst = n
+      best.pop(worst)
+  f.close()
+
+  # Print out the top NUM_MATCHES closest
+  dirs = ['E', 'NE', 'NE', 'N', 'N', 'NW', 'NW', 'W', 'W', 'SW',
+    'SW', 'S', 'S', 'SE', 'SE', 'E', 'E']
+  def sortfn(x,y):
+    if x[1] > y[1]: return 1
+    if x[1] < y[1]: return -1
+    return 0
+  best.sort(sortfn)
+  for x in best:
+    name = x[0]
+    distInKm = float(x[1])
+    xlat = float(x[2])
+    xlng = float(x[3])
+    angle = math.atan2(xlat - lat, (xlng - lng))
+    angle8 = int(angle / (math.pi / 8) + 8)
+    if angle8 < 0: angle8 = 0
+    direction = dirs[angle8]
+    print direction + ' of ' + name + ', ' + str(distInKm) + ' km. '
+
+
+
+main(sys.argv)
+
